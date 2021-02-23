@@ -599,16 +599,6 @@ static void dm_bow_dtr(struct dm_target *ti)
 	struct bow_context *bc = (struct bow_context *) ti->private;
 	struct kobject *kobj;
 
-	mutex_lock(&bc->ranges_lock);
-	while (rb_first(&bc->ranges)) {
-		struct bow_range *br = container_of(rb_first(&bc->ranges),
-						    struct bow_range, node);
-
-		rb_erase(&br->node, &bc->ranges);
-		kfree(br);
-	}
-	mutex_unlock(&bc->ranges_lock);
-
 	kobj = &bc->kobj_holder.kobj;
 	if (kobj->state_initialized) {
 		kobject_put(kobj);
@@ -620,6 +610,17 @@ static void dm_bow_dtr(struct dm_target *ti)
 	if (bc->bufio)
 		dm_bufio_client_destroy(bc->bufio);
 
+	mutex_lock(&bc->ranges_lock);
+	while (rb_first(&bc->ranges)) {
+		struct bow_range *br = container_of(rb_first(&bc->ranges),
+						    struct bow_range, node);
+
+		rb_erase(&br->node, &bc->ranges);
+		kfree(br);
+	}
+	mutex_unlock(&bc->ranges_lock);
+
+	mutex_destroy(&bc->ranges_lock);
 	kfree(bc->log_sector);
 	kfree(bc);
 }
