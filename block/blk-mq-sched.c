@@ -388,7 +388,7 @@ bool __blk_mq_sched_bio_merge(struct request_queue *q, struct bio *bio,
 
 bool blk_mq_sched_try_insert_merge(struct request_queue *q, struct request *rq)
 {
-	return rq_mergeable(rq) && elv_attempt_insert_merge(q, rq);
+	return rq_mergeable(rq) && elv_attempt_insert_merge(q, rq, NULL);
 }
 EXPORT_SYMBOL_GPL(blk_mq_sched_try_insert_merge);
 
