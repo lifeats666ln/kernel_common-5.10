@@ -2782,8 +2782,10 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 		if (mapping) {
 			if (PageSwapBacked(head))
 				__dec_node_page_state(head, NR_SHMEM_THPS);
-			else
+			else {
 				__dec_node_page_state(head, NR_FILE_THPS);
+				filemap_nr_thps_dec(mapping);
+			}
 		}
 
 		__split_huge_page(page, list, end, flags, mapping);
