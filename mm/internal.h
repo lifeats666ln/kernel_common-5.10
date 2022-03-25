@@ -64,9 +64,14 @@ extern void put_vma(struct vm_area_struct *vma);
 void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
 		unsigned long floor, unsigned long ceiling);
 
+static inline bool can_madv_lru_non_huge_vma(struct vm_area_struct *vma)
+{
+	return !(vma->vm_flags & (VM_LOCKED|VM_PFNMAP));
+}
+
 static inline bool can_madv_lru_vma(struct vm_area_struct *vma)
 {
-	return !(vma->vm_flags & (VM_LOCKED|VM_HUGETLB|VM_PFNMAP));
+	return can_madv_lru_non_huge_vma(vma) && !is_vm_hugetlb_page(vma);
 }
 
 void unmap_page_range(struct mmu_gather *tlb,
