@@ -6666,6 +6666,25 @@ static inline unsigned long cpu_util(int cpu)
 	return min_t(unsigned long, util, capacity_orig_of(cpu));
 }
 
+unsigned long cpu_util_cfs_boost(int cpu)
+{
+	struct cfs_rq *cfs_rq = &cpu_rq(cpu)->cfs;
+	unsigned long util = READ_ONCE(cfs_rq->avg.util_avg);
+	unsigned long runnable = READ_ONCE(cfs_rq->avg.runnable_avg);
+
+	util = max(util, runnable);
+
+	if (sched_feat(UTIL_EST)) {
+		unsigned long util_est;
+
+		util_est = READ_ONCE(cfs_rq->avg.util_est.enqueued);
+		util_est = max(util_est, runnable);
+		util = max(util, util_est);
+	}
+
+	return min_t(unsigned long, util, capacity_orig_of(cpu));
+}
+
 /*
  * cpu_util_without: compute cpu utilization without any contributions from *p
  * @cpu: the CPU which utilization is requested
@@ -6758,11 +6777,22 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 /*
  * Predicts what cpu_util(@cpu) would return if @p was migrated (and enqueued)
  * to @dst_cpu.
+ *
+ * With @boost set, the (boosted) CPU utilization is defined as
+ * max(CPU runnable, CPU utilization). CPU contention for CFS tasks can be
+ * detected by CPU runnable > CPU utilization.
  */
-static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
+static unsigned long
+cpu_util_next(int cpu, struct task_struct *p, int dst_cpu, int boost)
 {
 	struct cfs_rq *cfs_rq = &cpu_rq(cpu)->cfs;
 	unsigned long util_est, util = READ_ONCE(cfs_rq->avg.util_avg);
+	unsigned long runnable;
+
+	if (boost) {
+		runnable = READ_ONCE(cfs_rq->avg.runnable_avg);
+		util = max(util, runnable);
+	}
 
 	/*
 	 * If @p migrates from @cpu to another, remove its contribution. Or,
@@ -6786,6 +6816,9 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
 		 */
 		if (dst_cpu == cpu)
 			util_est += _task_util_est(p);
+
+		if (boost)
+			util_est = max(util_est, runnable);
 
 		util = max(util, util_est);
 	}
@@ -6819,8 +6852,8 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 	 * its pd list and will not be accounted by compute_energy().
 	 */
 	for_each_cpu_and(cpu, pd_mask, cpu_online_mask) {
-		unsigned long util_freq = cpu_util_next(cpu, p, dst_cpu);
-		unsigned long cpu_util, util_running = util_freq;
+		unsigned long util_freq = cpu_util_next(cpu, p, dst_cpu, 1);
+		unsigned long cpu_util, util_running = cpu_util_next(cpu, p, dst_cpu, 0);
 		struct task_struct *tsk = NULL;
 
 		/*
@@ -6835,7 +6868,7 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 		if (cpu == dst_cpu) {
 			tsk = p;
 			util_running =
-				cpu_util_next(cpu, p, -1) + task_util_est(p);
+				cpu_util_next(cpu, p, -1, 0) + task_util_est(p);
 		}
 
 		/*
@@ -6972,7 +7005,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu, int sy
 			if (!cpumask_test_cpu(cpu, p->cpus_ptr))
 				continue;
 
-			util = cpu_util_next(cpu, p, cpu);
+			util = cpu_util_next(cpu, p, cpu, 0);
 			cpu_cap = capacity_of(cpu);
 			spare_cap = cpu_cap;
 			lsub_positive(&spare_cap, util);
@@ -9798,7 +9831,7 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			break;
 
 		case migrate_util:
-			util = cpu_util(cpu_of(rq));
+			util = cpu_util_cfs_boost(cpu_of(rq));
 
 			/*
 			 * Don't try to pull utilization from a CPU with one

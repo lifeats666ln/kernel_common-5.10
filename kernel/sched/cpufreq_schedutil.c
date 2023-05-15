@@ -332,7 +332,8 @@ static void sugov_get_util(struct sugov_cpu *sg_cpu)
 
 	sg_cpu->max = max;
 	sg_cpu->bw_dl = cpu_bw_dl(rq);
-	sg_cpu->util = schedutil_cpu_util(sg_cpu->cpu, cpu_util_cfs(rq), max,
+	sg_cpu->util = schedutil_cpu_util(sg_cpu->cpu,
+					  cpu_util_cfs_boost(sg_cpu->cpu), max,
 					  FREQUENCY_UTIL, NULL);
 }
 
