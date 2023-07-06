@@ -6674,13 +6674,8 @@ unsigned long cpu_util_cfs_boost(int cpu)
 
 	util = max(util, runnable);
 
-	if (sched_feat(UTIL_EST)) {
-		unsigned long util_est;
-
-		util_est = READ_ONCE(cfs_rq->avg.util_est.enqueued);
-		util_est = max(util_est, runnable);
-		util = max(util, util_est);
-	}
+	if (sched_feat(UTIL_EST))
+		util = max(util, READ_ONCE(cfs_rq->avg.util_est.enqueued));
 
 	return min_t(unsigned long, util, capacity_orig_of(cpu));
 }
@@ -6816,9 +6811,6 @@ cpu_util_next(int cpu, struct task_struct *p, int dst_cpu, int boost)
 		 */
 		if (dst_cpu == cpu)
 			util_est += _task_util_est(p);
-
-		if (boost)
-			util_est = max(util_est, runnable);
 
 		util = max(util, util_est);
 	}
