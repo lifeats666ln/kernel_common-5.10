@@ -109,6 +109,7 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
  */
 extern struct file *alloc_empty_file(int, const struct cred *);
 extern struct file *alloc_empty_file_noaccount(int, const struct cred *);
+void release_empty_file(struct file *f);
 
 /*
  * super.c
