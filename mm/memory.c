@@ -3649,6 +3649,8 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct page *page = NULL, *swapcache;
+	struct swap_info_struct *si = NULL;
+	bool need_clear_cache = false;
 	swp_entry_t entry;
 	pte_t pte;
 	int locked;
@@ -3708,14 +3710,29 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	swapcache = page;
 
 	if (!page) {
-		struct swap_info_struct *si = swp_swap_info(entry);
 		bool skip_swapcache = false;
 
+		si = swp_swap_info(entry);
 		trace_android_vh_skip_swapcache(entry, &skip_swapcache);
 		if ((data_race(si->flags & SWP_SYNCHRONOUS_IO) || skip_swapcache) &&
 		    __swap_count(entry) == 1) {
 			/* skip swapcache */
 			gfp_t flags = GFP_HIGHUSER_MOVABLE | __GFP_CMA;
+
+			/*
+			 * Prevent parallel swapin from proceeding with
+			 * the cache flag. Otherwise, another thread may
+			 * finish swapin first, free the entry, and swapout
+			 * reusing the same entry. It's undetectable as
+			 * pte_same() returns true due to entry reuse.
+			 */
+			if (swapcache_prepare(entry)) {
+				/* Relax a bit to prevent rapid repeated page faults */
+				delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
+				schedule_timeout_uninterruptible(1);
+				goto out;
+			}
+			need_clear_cache = true;
 
 			trace_android_rvh_set_skip_swapcache_flags(&flags);
 			page = alloc_page_vma(flags, vma, vmf->address);
@@ -3905,6 +3922,9 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 out:
+	/* Clear the swap cache pin for direct swapin after PTL unlock */
+	if (need_clear_cache)
+		swapcache_clear(si, entry);
 	return ret;
 out_nomap:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
@@ -3916,6 +3936,8 @@ out_release:
 		unlock_page(swapcache);
 		put_page(swapcache);
 	}
+	if (need_clear_cache)
+		swapcache_clear(si, entry);
 	return ret;
 }
 
