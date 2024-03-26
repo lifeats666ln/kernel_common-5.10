@@ -4159,7 +4159,8 @@ static inline int util_fits_cpu(unsigned long util,
 	 * the time.
 	 */
 	capacity_orig = capacity_orig_of(cpu);
-	capacity_orig_thermal = capacity_orig - arch_scale_thermal_pressure(cpu);
+	capacity_orig_thermal = capacity_orig -
+				max(arch_scale_thermal_pressure(cpu), cpufreq_get_pressure(cpu));
 
 	/*
 	 * We want to force a task to fit a cpu as implied by uclamp_max.
@@ -8539,7 +8540,7 @@ static unsigned long scale_rt_capacity(int cpu)
 	 */
 	used = READ_ONCE(rq->avg_rt.util_avg);
 	used += READ_ONCE(rq->avg_dl.util_avg);
-	used += thermal_load_avg(rq);
+	used += max(thermal_load_avg(rq), cpufreq_get_pressure(cpu_of(rq)));
 
 	if (unlikely(used >= max))
 		return 1;
