@@ -2214,7 +2214,7 @@ ssize_t generic_file_buffered_read(struct kiocb *iocb,
 	if (unlikely(!iov_iter_count(iter)))
 		return 0;
 
-	iov_iter_truncate(iter, inode->i_sb->s_maxbytes);
+	iov_iter_truncate(iter, inode->i_sb->s_maxbytes - iocb->ki_pos);
 	trace_android_vh_filemap_read(filp, iocb->ki_pos, iov_iter_count(iter));
 
 	index = *ppos >> PAGE_SHIFT;
