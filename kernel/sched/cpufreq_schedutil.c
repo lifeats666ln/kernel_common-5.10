@@ -122,6 +122,15 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 	if (sg_policy->work_in_progress)
 		return true;
 
+	/*
+	 * When frequency-invariant utilization tracking is present, there's no
+	 * rate limit when increasing frequency. Therefore, the next frequency
+	 * must be determined before a decision can be made to rate limit the
+	 * frequency change, hence the rate limit check is bypassed here.
+	 */
+	if (arch_scale_freq_invariant())
+		return true;
+
 	/* No need to recalculate next freq for min_rate_limit_us
 	 * at least. However we might still decide to further rate
 	 * limit once frequency change direction is decided, according
@@ -139,7 +148,7 @@ static bool sugov_up_down_rate_limit(struct sugov_policy *sg_policy, u64 time,
 
 	delta_ns = time - sg_policy->last_freq_update_time;
 
-	if (next_freq > sg_policy->next_freq &&
+	if (next_freq > sg_policy->next_freq && !arch_scale_freq_invariant() &&
 	    delta_ns < sg_policy->up_rate_delay_ns)
 			return true;
 
