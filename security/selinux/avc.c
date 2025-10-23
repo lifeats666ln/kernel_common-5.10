@@ -30,6 +30,7 @@
 #include "avc.h"
 #include "avc_ss.h"
 #include "classmap.h"
+#include "hash.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/avc.h>
@@ -129,7 +130,7 @@ static struct kmem_cache *avc_xperms_cachep;
 
 static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
 {
-	return (ssid ^ (tsid<<2) ^ (tclass<<4)) & (AVC_CACHE_SLOTS - 1);
+	return av_hash(ssid, tsid, (u32)tclass, (u32)(AVC_CACHE_SLOTS - 1));
 }
 
 /**
