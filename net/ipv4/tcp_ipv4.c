@@ -1679,8 +1679,6 @@ u16 tcp_v4_get_syncookie(struct sock *sk, struct iphdr *iph,
  */
 int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 {
-	struct sock *rsk;
-
 	if (sk->sk_state == TCP_ESTABLISHED) { /* Fast path */
 		struct dst_entry *dst;
 
@@ -1710,22 +1708,21 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 			goto discard;
 		if (nsk != sk) {
 			if (tcp_child_process(sk, nsk, skb)) {
-				rsk = nsk;
+				sock_put(nsk);
 				goto reset;
 			}
+			sock_put(nsk);
 			return 0;
 		}
 	} else
 		sock_rps_save_rxhash(sk, skb);
 
-	if (tcp_rcv_state_process(sk, skb)) {
-		rsk = sk;
+	if (tcp_rcv_state_process(sk, skb))
 		goto reset;
-	}
 	return 0;
 
 reset:
-	tcp_v4_send_reset(rsk, skb);
+	tcp_v4_send_reset(sk, skb);
 discard:
 	kfree_skb(skb);
 	/* Be careful here. If this function gets more complicated and
@@ -2052,8 +2049,10 @@ process:
 			tcp_v4_restore_cb(skb);
 		} else if (tcp_child_process(sk, nsk, skb)) {
 			tcp_v4_send_reset(nsk, skb);
+			sock_put(nsk);
 			goto discard_and_relse;
 		} else {
+			sock_put(nsk);
 			sock_put(sk);
 			return 0;
 		}

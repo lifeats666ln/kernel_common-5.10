@@ -1518,8 +1518,11 @@ static int tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb)
 			goto discard;
 
 		if (nsk != sk) {
-			if (tcp_child_process(sk, nsk, skb))
+			if (tcp_child_process(sk, nsk, skb)) {
+				sock_put(nsk);
 				goto reset;
+			}
+			sock_put(nsk);
 			return 0;
 		}
 	} else
@@ -1694,8 +1697,10 @@ process:
 			tcp_v6_restore_cb(skb);
 		} else if (tcp_child_process(sk, nsk, skb)) {
 			tcp_v6_send_reset(nsk, skb);
+			sock_put(nsk);
 			goto discard_and_relse;
 		} else {
+			sock_put(nsk);
 			sock_put(sk);
 			return 0;
 		}
