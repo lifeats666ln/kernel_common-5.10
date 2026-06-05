@@ -6780,14 +6780,11 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 static unsigned long
 cpu_util_next(int cpu, struct task_struct *p, int dst_cpu, int boost)
 {
+	bool add_task = task_cpu(p) != cpu && dst_cpu == cpu;
+	bool sub_task = task_cpu(p) == cpu && dst_cpu != cpu;
 	struct cfs_rq *cfs_rq = &cpu_rq(cpu)->cfs;
 	unsigned long util_est, util = READ_ONCE(cfs_rq->avg.util_avg);
 	unsigned long runnable;
-
-	if (boost) {
-		runnable = READ_ONCE(cfs_rq->avg.runnable_avg);
-		util = max(util, runnable);
-	}
 
 	/*
 	 * If @p migrates from @cpu to another, remove its contribution. Or,
@@ -6795,10 +6792,20 @@ cpu_util_next(int cpu, struct task_struct *p, int dst_cpu, int boost)
 	 * the other cases, @cpu is not impacted by the migration, so the
 	 * util_avg should already be correct.
 	 */
-	if (task_cpu(p) == cpu && dst_cpu != cpu)
-		sub_positive(&util, task_util(p));
-	else if (task_cpu(p) != cpu && dst_cpu == cpu)
+	if (add_task)
 		util += task_util(p);
+	else if (sub_task)
+		sub_positive(&util, task_util(p));
+
+	if (boost) {
+		runnable = READ_ONCE(cfs_rq->avg.runnable_avg);
+		if (add_task)
+			runnable += READ_ONCE(p->se.avg.runnable_avg);
+		else if (sub_task)
+			sub_positive(&runnable,
+				     READ_ONCE(p->se.avg.runnable_avg));
+		util = max(util, runnable);
+	}
 
 	if (sched_feat(UTIL_EST)) {
 		util_est = READ_ONCE(cfs_rq->avg.util_est.enqueued);
