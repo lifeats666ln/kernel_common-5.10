@@ -1874,7 +1874,6 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
 	lockdep_assert_irqs_enabled();
 
 	if (timeout && (timeout->tv_sec | timeout->tv_nsec)) {
-		slack = select_estimate_accuracy(timeout);
 		to = &expires;
 		*to = timespec64_to_ktime(*timeout);
 	} else if (timeout) {
@@ -1955,9 +1954,12 @@ fetch_events:
 		}
 		write_unlock_irq(&ep->lock);
 
-		if (!eavail && !res)
+		if (!eavail && !res) {
+			if (to)
+				slack = select_estimate_accuracy(timeout);
 			timed_out = !freezable_schedule_hrtimeout_range(to, slack,
 									HRTIMER_MODE_ABS);
+		}
 
 		/*
 		 * We were woken up, thus go and try to harvest some events.
