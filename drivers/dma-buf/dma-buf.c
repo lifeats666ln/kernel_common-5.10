@@ -690,6 +690,21 @@ int dma_buf_fd(struct dma_buf *dmabuf, int flags)
 EXPORT_SYMBOL_GPL(dma_buf_fd);
 
 /**
+ * dma_buf_fd_install - install a reserved fd for a dma-buf
+ * @dmabuf:	[in]	pointer to dma_buf
+ * @fd:		[in]	fd reserved with get_unused_fd_flags()
+ *
+ * Publishes a previously reserved fd into the caller's fd table.
+ * Must only be called after all fallible work (e.g. copy_to_user)
+ * has succeeded, as it cannot be undone safely once called.
+ */
+void dma_buf_fd_install(struct dma_buf *dmabuf, int fd)
+{
+	fd_install(fd, dmabuf->file);
+}
+EXPORT_SYMBOL_GPL(dma_buf_fd_install);
+
+/**
  * dma_buf_get - returns the dma_buf structure related to an fd
  * @fd:	[in]	fd associated with the dma_buf to be returned
  *
