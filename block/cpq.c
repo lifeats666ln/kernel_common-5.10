@@ -1015,6 +1015,12 @@ static void cpq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 	 */
 	blk_req_zone_write_unlock(rq);
 
+	/* cpq_finish_request() on a merged @rq would recurse on cpqd->lock. */
+	if (!rq->elv.priv[0] && blk_mq_sched_try_insert_merge(q, rq)) {
+		spin_unlock_irq(&cpqd->lock);
+		return;
+	}
+
 	prio = ioprio_class_to_prio[ioprio_class];
 
 	cpqd->rq_in_driver[rq_is_sync(rq)]++;
@@ -1034,11 +1040,6 @@ static void cpq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 			per_prio->stats.inserted++;
 			rq->elv.priv[0] = (void *)(uintptr_t)1;
 		}
-	}
-
-	if (blk_mq_sched_try_insert_merge(q, rq)) {
-		spin_unlock_irq(&cpqd->lock);
-		return;
 	}
 
 	if (at_head) {
