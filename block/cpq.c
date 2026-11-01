@@ -1007,6 +1007,7 @@ static void cpq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 	u8 ioprio_class = IOPRIO_PRIO_CLASS(ioprio);
 	struct cpq_per_prio *per_prio;
 	enum cpq_prio prio;
+	LIST_HEAD(free);
 
 	spin_lock_irq(&cpqd->lock);
 	/*
@@ -1015,9 +1016,11 @@ static void cpq_insert_request(struct blk_mq_hw_ctx *hctx, struct request *rq,
 	 */
 	blk_req_zone_write_unlock(rq);
 
-	/* cpq_finish_request() on a merged @rq would recurse on cpqd->lock. */
-	if (!rq->elv.priv[0] && blk_mq_sched_try_insert_merge(q, rq)) {
+	/* cpq_finish_request() takes cpqd->lock, free merged requests later */
+	if (!rq->elv.priv[0] && rq_mergeable(rq) &&
+	    elv_attempt_insert_merge(q, rq, &free)) {
 		spin_unlock_irq(&cpqd->lock);
+		blk_mq_free_requests(&free);
 		return;
 	}
 
