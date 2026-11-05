@@ -123,6 +123,11 @@ struct psi_trigger {
 	/* Pending event flag */
 	int event;
 
+#ifndef __GENKSYMS__
+	/* Deferred event(s) from previous ratelimit window */
+	bool pending_event;
+#endif
+
 	/* Tracking window */
 	struct psi_window win;
 
@@ -131,9 +136,6 @@ struct psi_trigger {
 	 * events to one per window
 	 */
 	u64 last_event_time;
-
-	/* Deferred event(s) from previous ratelimit window */
-	bool pending_event;
 };
 
 struct psi_group {
