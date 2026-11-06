@@ -34,7 +34,9 @@ struct kernel_clone_args {
 	int io_thread;
 	struct cgroup *cgrp;
 	struct css_set *cset;
+#ifndef __GENKSYMS__
 	unsigned int kill_seq;
+#endif
 };
 
 /*
