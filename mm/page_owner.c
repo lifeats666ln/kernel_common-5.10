@@ -55,6 +55,10 @@ early_param("page_owner", early_page_owner_param);
 
 static bool need_page_owner(void)
 {
+	/* stack_depot_save() returns 0 for every trace */
+	if (stack_depot_is_disabled())
+		page_owner_enabled = false;
+
 	return page_owner_enabled;
 }
 

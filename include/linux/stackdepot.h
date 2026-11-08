@@ -23,6 +23,7 @@ unsigned int filter_irq_stacks(unsigned long *entries, unsigned int nr_entries);
 
 #ifdef CONFIG_STACKDEPOT
 int stack_depot_init(void);
+bool stack_depot_is_disabled(void);
 #else
 static inline int stack_depot_init(void)
 {

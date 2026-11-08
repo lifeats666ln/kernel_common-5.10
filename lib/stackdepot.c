@@ -162,6 +162,11 @@ static int __init is_stack_depot_disabled(char *str)
 }
 early_param("stack_depot_disable", is_stack_depot_disabled);
 
+bool stack_depot_is_disabled(void)
+{
+	return stack_depot_disable;
+}
+
 int __init stack_depot_init(void)
 {
 	if (!stack_depot_disable) {
