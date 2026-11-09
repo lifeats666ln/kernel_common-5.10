@@ -1203,7 +1203,9 @@ struct task_struct {
 	unsigned long rseq_event_mask;
 #endif
 
+#if defined(__GENKSYMS__) || !defined(CONFIG_ARM64)
 	struct tlbflush_unmap_batch	tlb_ubc;
+#endif
 
 	union {
 		refcount_t		rcu_users;
@@ -1391,7 +1393,11 @@ struct task_struct {
 		unsigned	user_dumpable:1;
 		});
 
+#ifdef CONFIG_ARM64
+	ANDROID_KABI_USE(3, struct tlbflush_unmap_batch tlb_ubc);
+#else
 	ANDROID_KABI_RESERVE(3);
+#endif
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
 

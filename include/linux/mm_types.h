@@ -586,7 +586,7 @@ struct mm_struct {
 		 * moving a PROT_NONE or PROT_NUMA mapped page.
 		 */
 		atomic_t tlb_flush_pending;
-#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
+#if defined(CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH) && !defined(__GENKSYMS__)
 		/* See flush_tlb_batched_pending() */
 		atomic_t tlb_flush_batched;
 #endif
