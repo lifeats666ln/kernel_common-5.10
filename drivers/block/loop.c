@@ -2050,6 +2050,7 @@ static void loop_handle_cmd(struct loop_cmd *cmd)
 	 * not yet been completed.
 	 */
 	ret = do_req_filebacked(lo, rq);
+
  failed:
 	/* complete non-aio request */
 	if (!use_aio || ret) {
