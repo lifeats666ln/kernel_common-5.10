@@ -295,12 +295,12 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 }
 
 static int cass_select_task_rq(struct task_struct *p, int prev_cpu,
-			       int wake_flags, bool rt)
+			       int sd_flag, int wake_flags, bool rt)
 {
 	bool sync;
 
 	/* Don't balance on exec since we don't know what @p will look like */
-	if (wake_flags & SD_BALANCE_EXEC)
+	if (sd_flag & SD_BALANCE_EXEC)
 		return prev_cpu;
 
 	/*
@@ -312,7 +312,7 @@ static int cass_select_task_rq(struct task_struct *p, int prev_cpu,
 		return cpumask_first(p->cpus_ptr);
 
 	/* cass_best_cpu() needs the CFS task's utilization, so sync it up */
-	if (!rt && !(wake_flags & SD_BALANCE_FORK))
+	if (!rt && !(sd_flag & SD_BALANCE_FORK))
 		sync_entity_load_avg(&p->se);
 
 	sync = (wake_flags & WF_SYNC) && !(current->flags & PF_EXITING);
@@ -320,12 +320,30 @@ static int cass_select_task_rq(struct task_struct *p, int prev_cpu,
 }
 
 static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
-				    int wake_flags)
+				    int sd_flag, int wake_flags)
 {
-	return cass_select_task_rq(p, prev_cpu, wake_flags, false);
+	int target_cpu = -1;
+
+	if (trace_android_rvh_select_task_rq_fair_enabled() &&
+	    !(sd_flag & SD_BALANCE_FORK))
+		sync_entity_load_avg(&p->se);
+	trace_android_rvh_select_task_rq_fair(p, prev_cpu, sd_flag,
+			wake_flags, &target_cpu);
+	if (target_cpu >= 0)
+		return target_cpu;
+
+	return cass_select_task_rq(p, prev_cpu, sd_flag, wake_flags, false);
 }
 
-int cass_select_task_rq_rt(struct task_struct *p, int prev_cpu, int wake_flags)
+int cass_select_task_rq_rt(struct task_struct *p, int prev_cpu, int sd_flag,
+			   int wake_flags)
 {
-	return cass_select_task_rq(p, prev_cpu, wake_flags, true);
+	int target_cpu = -1;
+
+	trace_android_rvh_select_task_rq_rt(p, prev_cpu, sd_flag,
+					wake_flags, &target_cpu);
+	if (target_cpu >= 0)
+		return target_cpu;
+
+	return cass_select_task_rq(p, prev_cpu, sd_flag, wake_flags, true);
 }
