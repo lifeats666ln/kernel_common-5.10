@@ -181,7 +181,9 @@ static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 	if (sg_policy->next_freq == next_freq)
 		return false;
 
-	if (sugov_up_down_rate_limit(sg_policy, time, next_freq)) {
+	/* A frequency that wasn't set yet can be amended at any time */
+	if (!sg_policy->work_in_progress &&
+	    sugov_up_down_rate_limit(sg_policy, time, next_freq)) {
 		/* Don't let get_next_freq() drop the retry as a cache hit */
 		sg_policy->cached_raw_freq = 0;
 		return false;
