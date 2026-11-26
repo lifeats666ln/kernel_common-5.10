@@ -44,8 +44,13 @@ void cass_cpu_util(struct cass_cpu_cand *c, int this_cpu, bool sync)
 	struct cfs_rq *cfs_rq = &rq->cfs;
 	unsigned long est;
 
-	/* Get this CPU's utilization from CFS tasks */
-	c->util = READ_ONCE(cfs_rq->avg.util_avg);
+	/*
+	 * Get this CPU's utilization from CFS tasks. Include runnable_avg so
+	 * that contention is seen the same way schedutil sees it through
+	 * cpu_util_cfs_boost().
+	 */
+	c->util = max(READ_ONCE(cfs_rq->avg.util_avg),
+		      READ_ONCE(cfs_rq->avg.runnable_avg));
 	if (sched_feat(UTIL_EST)) {
 		est = READ_ONCE(cfs_rq->avg.util_est.enqueued);
 		if (est > c->util) {
@@ -60,7 +65,8 @@ void cass_cpu_util(struct cass_cpu_cand *c, int this_cpu, bool sync)
 	 * @current is an RT task; RT tasks don't have per-entity load tracking.
 	 */
 	if (sync && c->cpu == this_cpu && !rt_task(current))
-		c->util -= min(c->util, task_util(current));
+		c->util -= min(c->util, max(task_util(current),
+				READ_ONCE(current->se.avg.runnable_avg)));
 
 	/* Get the utilization of everything other than CFS tasks */
 	c->hard_util = cpu_util_rt(rq) + cpu_util_dl(rq) + cpu_util_irq(rq);
