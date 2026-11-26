@@ -328,15 +328,10 @@ static int cass_select_task_rq(struct task_struct *p, int prev_cpu,
 static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
 				    int sd_flag, int wake_flags)
 {
-	int target_cpu = -1;
-
-	if (trace_android_rvh_select_task_rq_fair_enabled() &&
-	    !(sd_flag & SD_BALANCE_FORK))
-		sync_entity_load_avg(&p->se);
-	trace_android_rvh_select_task_rq_fair(p, prev_cpu, sd_flag,
-			wake_flags, &target_cpu);
-	if (target_cpu >= 0)
-		return target_cpu;
+	/* Vendor placement hooks live in the original path, so use it */
+	if (trace_android_rvh_select_task_rq_fair_enabled() ||
+	    trace_android_rvh_find_energy_efficient_cpu_enabled())
+		return select_task_rq_fair(p, prev_cpu, sd_flag, wake_flags);
 
 	return cass_select_task_rq(p, prev_cpu, sd_flag, wake_flags, false);
 }
@@ -344,12 +339,5 @@ static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
 int cass_select_task_rq_rt(struct task_struct *p, int prev_cpu, int sd_flag,
 			   int wake_flags)
 {
-	int target_cpu = -1;
-
-	trace_android_rvh_select_task_rq_rt(p, prev_cpu, sd_flag,
-					wake_flags, &target_cpu);
-	if (target_cpu >= 0)
-		return target_cpu;
-
 	return cass_select_task_rq(p, prev_cpu, sd_flag, wake_flags, true);
 }
