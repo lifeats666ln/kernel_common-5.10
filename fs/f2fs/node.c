@@ -415,7 +415,6 @@ bool f2fs_need_inode_block_update(struct f2fs_sb_info *sbi, nid_t ino)
 	struct nat_entry *e;
 	bool need_update = true;
 
-	f2fs_down_read(&sbi->node_write);
 	f2fs_down_read(&nm_i->nat_tree_lock);
 	e = __lookup_nat_cache(nm_i, ino);
 	if (e && get_nat_flag(e, HAS_LAST_FSYNC) &&
@@ -423,7 +422,6 @@ bool f2fs_need_inode_block_update(struct f2fs_sb_info *sbi, nid_t ino)
 			 get_nat_flag(e, HAS_FSYNCED_INODE)))
 		need_update = false;
 	f2fs_up_read(&nm_i->nat_tree_lock);
-	f2fs_up_read(&sbi->node_write);
 	return need_update;
 }
 
@@ -1442,7 +1440,8 @@ repeat:
 
 	err = read_node_page(page, 0);
 	if (err < 0) {
-		goto out_put_err;
+		f2fs_put_page(page, 1);
+		return ERR_PTR(err);
 	} else if (err == LOCKED_PAGE) {
 		err = 0;
 		goto page_hit;
@@ -1468,23 +1467,19 @@ repeat:
 		goto out_err;
 	}
 page_hit:
-	if (likely(nid == nid_of_node(page)))
-		return page;
-
-	f2fs_warn(sbi, "inconsistent node block, nid:%lu, node_footer[nid:%u,ino:%u,ofs:%u,cpver:%llu,blkaddr:%u]",
+	if (unlikely(nid != nid_of_node(page))) {
+		f2fs_warn(sbi, "inconsistent node block, nid:%lu, node_footer[nid:%u,ino:%u,ofs:%u,cpver:%llu,blkaddr:%u]",
 			  nid, nid_of_node(page), ino_of_node(page),
 			  ofs_of_node(page), cpver_of_node(page),
 			  next_blkaddr_of_node(page));
-	set_sbi_flag(sbi, SBI_NEED_FSCK);
-	err = -EINVAL;
+		set_sbi_flag(sbi, SBI_NEED_FSCK);
+		err = -EINVAL;
 out_err:
-	ClearPageUptodate(page);
-out_put_err:
-	/* ENOENT comes from read_node_page which is not an error. */
-	if (err != -ENOENT)
-		f2fs_handle_page_eio(sbi, page->index, NODE);
-	f2fs_put_page(page, 1);
-	return ERR_PTR(err);
+		ClearPageUptodate(page);
+		f2fs_put_page(page, 1);
+		return ERR_PTR(err);
+	}
+	return page;
 }
 
 struct page *f2fs_get_node_page(struct f2fs_sb_info *sbi, pgoff_t nid)
@@ -1592,10 +1587,9 @@ continue_unlock:
 	return last_page;
 }
 
-static int __write_node_page(struct page *page, bool atomic, bool do_fsync,
-				bool *submitted, struct writeback_control *wbc,
-				bool do_balance, enum iostat_type io_type,
-				unsigned int *seq_id)
+static int __write_node_page(struct page *page, bool atomic, bool *submitted,
+				struct writeback_control *wbc, bool do_balance,
+				enum iostat_type io_type, unsigned int *seq_id)
 {
 	struct f2fs_sb_info *sbi = F2FS_P_SB(page);
 	nid_t nid;
@@ -1617,10 +1611,13 @@ static int __write_node_page(struct page *page, bool atomic, bool do_fsync,
 	trace_f2fs_writepage(page, NODE);
 
 	if (unlikely(f2fs_cp_error(sbi))) {
-		ClearPageUptodate(page);
-		dec_page_count(sbi, F2FS_DIRTY_NODES);
-		unlock_page(page);
-		return 0;
+		if (is_sbi_flag_set(sbi, SBI_IS_CLOSE)) {
+			ClearPageUptodate(page);
+			dec_page_count(sbi, F2FS_DIRTY_NODES);
+			unlock_page(page);
+			return 0;
+		}
+		goto redirty_out;
 	}
 
 	if (unlikely(is_sbi_flag_set(sbi, SBI_POR_DOING)))
@@ -1663,12 +1660,6 @@ static int __write_node_page(struct page *page, bool atomic, bool do_fsync,
 
 	if (atomic && !test_opt(sbi, NOBARRIER))
 		fio.op_flags |= REQ_PREFLUSH | REQ_FUA;
-
-	set_dentry_mark(page, false);
-	set_fsync_mark(page, do_fsync);
-	if (IS_INODE(page) && (atomic || is_fsync_dnode(page)))
-		set_dentry_mark(page,
-				f2fs_need_dentry_mark(sbi, ino_of_node(page)));
 
 	/* should add to global list before clearing PAGECACHE status */
 	if (f2fs_in_warm_node_list(sbi, page)) {
@@ -1729,7 +1720,7 @@ int f2fs_move_node_page(struct page *node_page, int gc_type)
 			goto out_page;
 		}
 
-		if (__write_node_page(node_page, false, false, NULL,
+		if (__write_node_page(node_page, false, NULL,
 					&wbc, false, FS_GC_NODE_IO, NULL)) {
 			err = -EAGAIN;
 			unlock_page(node_page);
@@ -1750,7 +1741,7 @@ release_page:
 static int f2fs_write_node_page(struct page *page,
 				struct writeback_control *wbc)
 {
-	return __write_node_page(page, false, false, NULL, wbc, false,
+	return __write_node_page(page, false, NULL, wbc, false,
 						FS_NODE_IO, NULL);
 }
 
@@ -1783,7 +1774,6 @@ retry:
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 			bool submitted = false;
-			bool do_fsync = false;
 
 			if (unlikely(f2fs_cp_error(sbi))) {
 				f2fs_put_page(last_page, 0);
@@ -1814,12 +1804,17 @@ continue_unlock:
 
 			f2fs_wait_on_page_writeback(page, NODE, true, true);
 
+			set_fsync_mark(page, 0);
+			set_dentry_mark(page, 0);
+
 			if (!atomic || page == last_page) {
-				do_fsync = true;
+				set_fsync_mark(page, 1);
 				if (IS_INODE(page)) {
 					if (is_inode_flag_set(inode,
 								FI_DIRTY_INODE))
 						f2fs_update_inode(inode, page);
+					set_dentry_mark(page,
+						f2fs_need_dentry_mark(sbi, ino));
 				}
 				/* may be written by other thread */
 				if (!PageDirty(page))
@@ -1831,9 +1826,8 @@ continue_unlock:
 
 			ret = __write_node_page(page, atomic &&
 						page == last_page,
-						do_fsync, &submitted,
-						wbc, true, FS_NODE_IO,
-						seq_id);
+						&submitted, wbc, true,
+						FS_NODE_IO, seq_id);
 			if (ret) {
 				unlock_page(page);
 				f2fs_put_page(last_page, 0);
@@ -2024,9 +2018,11 @@ continue_unlock:
 
 			/* flush inline_data */
 			if (page_private_inline(page)) {
+				nid_t ino = ino_of_node(page);
+
 				clear_page_private_inline(page);
 				unlock_page(page);
-				flush_inline_data(sbi, ino_of_node(page));
+				flush_inline_data(sbi, ino);
 				goto lock_node;
 			}
 
@@ -2042,7 +2038,10 @@ write_node:
 			if (!clear_page_dirty_for_io(page))
 				goto continue_unlock;
 
-			ret = __write_node_page(page, false, false, &submitted,
+			set_fsync_mark(page, 0);
+			set_dentry_mark(page, 0);
+
+			ret = __write_node_page(page, false, &submitted,
 						wbc, do_balance, io_type, NULL);
 			if (ret)
 				unlock_page(page);
@@ -2703,6 +2702,44 @@ int f2fs_recover_inline_xattr(struct inode *inode, struct page *page)
 	f2fs_wait_on_page_writeback(ipage, NODE, true, true);
 	memcpy(dst_addr, src_addr, inline_size);
 update_inode:
+	/*
+	 * The xattr node of the checkpoint was removed before fsync, e.g. the
+	 * xattrs became small enough to fit inline. Release it as well, or
+	 * the inode keeps pointing to the stale xattrs.
+	 */
+	if (!ri->i_xattr_nid && F2FS_I(inode)->i_xattr_nid) {
+		struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+		struct node_info ni;
+		int err;
+
+		err = f2fs_get_node_info(sbi, F2FS_I(inode)->i_xattr_nid,
+								&ni, false);
+		if (err) {
+			f2fs_put_page(ipage, 1);
+			return err;
+		}
+
+		if (ni.blk_addr != NEW_ADDR &&
+		    !f2fs_is_valid_blkaddr(sbi, ni.blk_addr,
+					   DATA_GENERIC_ENHANCE)) {
+			f2fs_err(sbi,
+				"nat entry is corrupted, run fsck to fix it, ino:%u, nid:%u, blkaddr:%u",
+				ni.ino, ni.nid, ni.blk_addr);
+			set_sbi_flag(sbi, SBI_NEED_FSCK);
+			f2fs_put_page(ipage, 1);
+			return -EFSCORRUPTED;
+		}
+
+		f2fs_invalidate_blocks(sbi, ni.blk_addr);
+		dec_valid_node_count(sbi, inode, false);
+		set_node_addr(sbi, &ni, NULL_ADDR, false);
+		/* drop the cached xattr node, which may be dirty */
+		truncate_inode_pages_range(NODE_MAPPING(sbi),
+				F2FS_BLK_TO_BYTES((loff_t)ni.nid),
+				F2FS_BLK_TO_BYTES((loff_t)ni.nid + 1) - 1);
+		f2fs_i_xnid_write(inode, 0);
+	}
+
 	f2fs_update_inode(inode, ipage);
 	f2fs_put_page(ipage, 1);
 	return 0;
@@ -2746,9 +2783,7 @@ recover_xnid:
 	f2fs_update_inode_page(inode);
 
 	/* 3: update and set xattr node page dirty */
-	if (page)
-		memcpy(F2FS_NODE(xpage), F2FS_NODE(page),
-				VALID_XATTR_BLOCK_SIZE);
+	memcpy(F2FS_NODE(xpage), F2FS_NODE(page), VALID_XATTR_BLOCK_SIZE);
 
 	set_page_dirty(xpage);
 	f2fs_put_page(xpage, 1);
@@ -3044,7 +3079,7 @@ int f2fs_flush_nat_entries(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 	struct f2fs_journal *journal = curseg->journal;
 	struct nat_entry_set *setvec[SETVEC_SIZE];
 	struct nat_entry_set *set, *tmp;
-	unsigned int found, entry_count = 0;
+	unsigned int found;
 	nid_t set_idx = 0;
 	LIST_HEAD(sets);
 	int err = 0;
@@ -3084,18 +3119,6 @@ int f2fs_flush_nat_entries(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 						MAX_NAT_JENTRIES(journal));
 	}
 
-	/*
-	 * Readahead the current NAT block to prevent read requests from
-	 * being issued and waited on one by one.
-	 */
-	list_for_each_entry(set, &sets, set_list) {
-		entry_count += set->entry_cnt;
-		if (!enabled_nat_bits(sbi, cpc) &&
-			__has_cursum_space(journal,
-					entry_count, NAT_JOURNAL))
-			continue;
-		f2fs_ra_meta_pages(sbi, set->set, 1, META_NAT, true);
-	}
 	/* flush dirty nats in nat entry set */
 	list_for_each_entry_safe(set, tmp, &sets, set_list) {
 		err = __flush_nat_entry_set(sbi, set, cpc);
